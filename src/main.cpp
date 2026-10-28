@@ -1,5 +1,6 @@
-#include <iostream>
 #include "lexer/lexer.hpp"
+
+#include <iostream>
 
 int main() {
     std::string input;

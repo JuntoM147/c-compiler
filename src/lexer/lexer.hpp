@@ -1,58 +1,34 @@
-#include <string>
-#include <vector>
+#include "token.hpp"
+#include "../error/error.hpp"
 
-enum class TokenType {
-    identifier,
-    constant,
-    keyword_int,
-    keyword_void,
-    keyword_return,
-    paren_open,
-    paren_close,
-    brace_open,
-    brace_close,
-    semicolon,
-};
+#include <istream>
+#include <optional>
+#include <variant>
 
-std::string print_tok_type(TokenType t);
+namespace compiler {
 
-class Token {
-    public:
-        Token() = delete;
-        
-        Token(TokenType token_type, std::string token_value) 
-            : _token_type {token_type},
-            _value {token_value}
-        {}
-
-        void print();
-
-    private:
-        TokenType _token_type;
-        std::string _value;
-};
-
+/* 
+   Lexer takes a input stream and emits Tokens sequentially by 
+   calling the member function GetNextToken
+*/
+using TokenOrError = std::variant<Token, Error>;
 
 class Lexer {
     public:
         Lexer() = delete;
+        Lexer(std::istream& source) : source_{source} {}
+        ~Lexer() = default;
 
-        Lexer(std::string input);
-
-        void print();
+        TokenOrError GetNextToken();
 
     private:
-        bool is_at_end();
-        char peek();
-        void advance();
-        char consume();
-        void lex_identifier_or_keyword();
-        void lex_constant();
-        void lex_punctuation();
-        void skip_whitespace();
+        std::istream& source_;
 
-        std::string _input;
-        std::vector<Token> _tokens;
-        size_t _index;
+        std::optional<Error> ConsumeWhile(std::string& token, bool (*predicate)(char));
+        [[nodiscard]] TokenOrError LexIdentifierOrKeyword();
+        [[nodiscard]] TokenOrError LexPunctuation();
+        [[nodiscard]] TokenOrError LexConstant();
 };
+
+} // namespace compiler
 

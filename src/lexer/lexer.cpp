@@ -1,188 +1,192 @@
-#include <cctype>
-#include <iostream>
-#include <cassert>
 #include "lexer.hpp"
 
-bool is_whitespace(char curr) {
-    return curr == ' ' || curr == '\t' || curr == '\n';
+#include <iostream>
+#include <string>
+#include <utility>
+#include <optional>
+
+namespace compiler {
+
+namespace {
+
+constexpr int kEOF = std::char_traits<char>::eof();
+
+// Assumes ASCII whitespace
+bool IsWhiteSpace(char c)
+{
+    return c == '\t' || c == '\n' || c == '\v' || 
+           c == '\f' || c == '\r' || c == ' ';
+}
+
+// True if c is [a-zA-Z] or _
+bool IsAlphaOr_(char c) 
+{
+    return ('a' <= c && c <= 'z') || 
+           ('A' <= c && c <= 'Z') || 
+             c == '_';
 }
 
 
-char Lexer::peek()
+bool IsDigit(char c) 
 {
-    assert(_index < _input.size());
-    return _input.at(_index);
+    return c >= '0' && c <= '9';
 }
 
-
-bool Lexer::is_at_end()
+bool IsPunctuation(char c)
 {
-    return _index >= _input.size();
+    return c == '(' || c == ')' || 
+           c == '{' || c == '}' ||  
+           c == ';';
 }
 
-void Lexer::advance()
-{
-    _index++;
+bool IsIdentifierChar(char c) {
+    return IsAlphaOr_(c) || IsDigit(c);
 }
 
+} // namespace
 
-void Lexer::lex_identifier_or_keyword()
+
+std::optional<Error> Lexer::ConsumeWhile(std::string& token, bool (*predicate)(char))
 {
-    size_t start = _index;
+    int peek {source_.peek()};
 
-    while (!is_at_end() && (std::isalnum(peek()) || peek() == '_')) {
-        advance();
+    while (peek != kEOF && predicate(static_cast<char>(peek))) {
+        int curr = source_.get();
+
+        if (curr == kEOF) {
+            return Error("Lexer Error: stream error");
+        }
+
+        // Guranteed not to be EOF
+        token.push_back(static_cast<char>(curr)); 
+        peek = source_.peek();
     }
+
+    // Check that no stream error occurred
+    if (peek == kEOF && (source_.bad() || !source_.eof())) {
+        return Error("Lexer Error: stream error");
+    }
+
+    return {};
+}
+
+
+// Lexes [0-9]+
+TokenOrError Lexer::LexConstant()
+{
+    std::string token {};
+
+    auto err = ConsumeWhile(token, IsDigit);
+
+    // Error
+    if (err.has_value()) {
+        return err.value();
+    }
+
+    int peek {source_.peek()};
     
-    std::string value = _input.substr(start, _index - start);
-
-    if (value == "int") {
-        _tokens.push_back(Token(
-                    TokenType::keyword_int,
-                    value
-                    ));
-    } else if (value == "void") {
-        _tokens.push_back(Token(
-                    TokenType::keyword_void,
-                    value
-                    ));
-    } else if (value == "return") {
-        _tokens.push_back(Token(
-                    TokenType::keyword_return,
-                    value
-                    ));
-    } else {
-        _tokens.push_back(Token(
-                    TokenType::identifier,
-                    value
-                    ));
+    // Check the constant is not a invalid identifier (123abc)
+    if (peek != kEOF && IsAlphaOr_(static_cast<char>(peek))) {
+        return Error("Lexer Error: Encountered invalid identifier");
     }
+
+    return Token(TokenType::kConstant, std::move(token));
 }
 
 
-void Lexer::lex_constant()
+TokenOrError Lexer::LexIdentifierOrKeyword()
 {
-    size_t start = _index;
+    std::string token {};
 
-    while (!is_at_end() && std::isdigit(peek())) {
-        advance();
+    auto err = ConsumeWhile(token, IsIdentifierChar);
+
+    // Error
+    if (err.has_value()) {
+        return err.value();
     }
 
-    if (!is_at_end() && (peek() == '_' || std::isalpha(peek()))) {
-        throw std::runtime_error("Invalid integer constant");
-    }
+    if (token == "int") {
+        return Token(TokenType::kKeywordInt);
+    } 
 
-    _tokens.push_back(Token(
-                TokenType::constant, 
-                _input.substr(start, _index - start)
-                ));
+    if (token == "void") {
+        return Token(TokenType::kKeywordVoid);
+    } 
+
+    if (token == "return") {
+        return Token(TokenType::kKeywordReturn);
+    } 
+
+    return Token(TokenType::kIdentifier, std::move(token));
 }
 
 
-void Lexer::lex_punctuation()
+// Lexes '(' ')' '{' '}' ';' 
+TokenOrError Lexer::LexPunctuation()
 {
-    switch(peek()) {
+    char curr {static_cast<char>(source_.get())};
+    switch(curr) {
         case '(':
-            _tokens.push_back(Token(TokenType::paren_open, "("));
-            break;
+            return Token(TokenType::kParenOpen);
         case ')':
-            _tokens.push_back(Token(TokenType::paren_close, ")"));
-            break;
+            return Token(TokenType::kParenClose);
         case '{':
-            _tokens.push_back(Token(TokenType::brace_open, "{"));
-            break;
+            return Token(TokenType::kBraceOpen);
         case '}':
-            _tokens.push_back(Token(TokenType::brace_close, "}"));
-            break;
+            return Token(TokenType::kBraceClose);
         case ';':
-            _tokens.push_back(Token(TokenType::semicolon, ";"));
-            break;
+            return Token(TokenType::kSemicolon);
         default:
-            throw std::runtime_error("Not a valid punctuation");
-    }
-
-    advance();
-}
-
-void Lexer::skip_whitespace()
-{
-    while (!is_at_end() && is_whitespace(peek())) {
-        advance();
-    }
-}
-
-
-Lexer::Lexer(std::string input)
-    : _input {input},
-    _index {0}
-{
-    while (!is_at_end()) {
-        skip_whitespace();
-
-        if (is_at_end()) {
-            std::cout << "at end now\n";
             break;
+    }
+
+    std::string err_string = "Lexer Error: Encountered invalid punctuation: ";
+    err_string += curr;
+    return Error(std::move(err_string));
+}
+
+
+TokenOrError Lexer::GetNextToken()
+{   
+    // std::istream::peek() returns a int to represent all chars + eof (-1)
+    int peek {source_.peek()};
+
+    // Trim whitespace
+    while (peek != kEOF && IsWhiteSpace(static_cast<char>(peek))) {
+        source_.get();
+        peek = source_.peek();
+    }
+
+    // Reached end of file or Stream error
+    if (peek == kEOF) {
+        if (source_.bad()) {
+            return Error("Lexer Error: IO Stream Error (serious failure: bad bit set)");
         }
 
-        char curr = peek();
-        try {
-            if (std::isalpha(curr) || curr == '_') {
-                lex_identifier_or_keyword();
-            } else if (std::isdigit(curr)) {
-                lex_constant();
-            } else {
-                lex_punctuation();
-            }
-        } catch (std::exception& e) {
-            std::cerr << "Lexer Error: " << e.what() << std::endl;
+        if (source_.eof()) {
+            return Token(TokenType::kEOF);
         }
+
+        return Error("Lexer Error: IO stream error (other)");
     }
+
+    // Valid character
+    if (IsAlphaOr_(peek)) {
+        return LexIdentifierOrKeyword();
+    } 
+
+    if (IsDigit(peek)) {
+        return LexConstant();
+    } 
+
+    if (IsPunctuation(peek)) {
+        return LexPunctuation();
+    }
+
+    std::string err_string = "Lexer Error: Unknown character: "; 
+    err_string += static_cast<char>(peek);
+    return Error(std::move(err_string));
 }
 
-
-std::string print_tok_type(TokenType t)
-{
-    switch (t) {
-        case TokenType::identifier:
-            return "IDENTIFIER";
-        case TokenType::constant:
-            return "CONSTANT";
-        case TokenType::keyword_int:
-            return "int";
-        case TokenType::keyword_void:
-            return "void";
-        case TokenType::keyword_return:
-            return "return";
-        case TokenType::paren_open:
-            return "(";
-        case TokenType::paren_close:
-            return ")";
-        case TokenType::brace_open:
-            return "{";
-        case TokenType::brace_close:
-            return "}";
-        case TokenType::semicolon:
-            return ";";
-        default:
-            return "";
-    }
-}
-
-
-void Token::print()
-{
-    if (_token_type == TokenType::identifier || _token_type == TokenType::constant) {
-        std::cout << print_tok_type(_token_type) << ": " << _value << std::endl;
-    } else {
-        std::cout << print_tok_type(_token_type) << std::endl;
-    }
-}
-
-
-void Lexer::print()
-{
-    for (auto& t : _tokens) {
-        t.print();
-    }
-}
+} // namespace compiler
 
