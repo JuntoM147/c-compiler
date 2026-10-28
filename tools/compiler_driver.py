@@ -10,6 +10,7 @@ parser = argparse.ArgumentParser(prog="compiler_driver",
 
 parser.add_argument('filename')
 
+# Optional flags
 group = parser.add_mutually_exclusive_group(required=False)
 group.add_argument('-S', 
                     help="Option that directs the compiler to emit assembly but not assemble or link it",
@@ -29,13 +30,15 @@ args = parser.parse_args()
 if not args.filename.endswith(".c"):
     parser.error("source file must be a C file")
 
-
 output_file = args.filename.removesuffix(".c")
 
+#TODO: remove
 sys.exit(0)
 
 try:
     # Preprocess the source file
+        # -E to only run the preprocessor
+        # -P to not emit line markers
     preprocessed_file = output_file + ".i"
     subprocess.run(["gcc", str(args.filename), "-E", "-P", "-o", preprocessed_file], check=True)
 
